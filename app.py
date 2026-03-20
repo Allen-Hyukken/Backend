@@ -1,7 +1,8 @@
 """
 app.py — Flask application factory
 
-Port 8080 matches Flutter's:  static const String baseUrl = 'http://192.168.1.2:8080/api';
+host="0.0.0.0" means the server listens on ALL network interfaces,
+so your phone can reach it over Wi-Fi at http://<PC-LAN-IP>:5000
 """
 
 from flask import Flask, jsonify
@@ -32,7 +33,18 @@ def create_app(config_class=Config):
     app.register_blueprint(quiz_bp)
     app.register_blueprint(attempt_bp)
 
-    # NOTE: tables are already created by the MySQL schema script — no db.create_all()
+    # ── Health-check endpoint (no auth required) ────────────────────────────
+    # Flutter's ConnectionCheckScreen hits this to verify:
+    #   1. Flask is reachable over Wi-Fi
+    #   2. MySQL connection is working
+    @app.get("/api/ping")
+    def ping():
+        db_status = "ok"
+        try:
+            db.session.execute(db.text("SELECT 1"))
+        except Exception as e:
+            db_status = f"error: {e}"
+        return jsonify({"status": "ok", "db": db_status}), 200
 
     # ── Global error handlers ───────────────────────────────────────────────
     @app.errorhandler(RuntimeError)
@@ -76,4 +88,4 @@ def create_app(config_class=Config):
 
 
 if __name__ == "__main__":
-    create_app().run(debug=True, host="0.0.0.0", port=8080)
+    create_app().run(debug=True, host="0.0.0.0", port=5000)
