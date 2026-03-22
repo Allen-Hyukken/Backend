@@ -146,3 +146,36 @@ def _to_question_response(q: Question, teacher_view: bool) -> dict:
     if teacher_view:
         resp["correctAnswer"] = q.correct_answer
     return resp
+
+
+def get_quiz_leaderboard(quiz_id: int) -> list:
+    from models import Attempt
+
+    quiz = Quiz.query.get(quiz_id)
+    if not quiz:
+        raise RuntimeError("Quiz not found")
+
+    # Get all attempts for this quiz
+    attempts = Attempt.query.filter_by(quiz_id=quiz_id).all()
+
+    leaderboard = []
+    for attempt in attempts:
+        student = attempt.student
+        leaderboard.append({
+            "userId":      student.id,
+            "name":        student.name,
+            "score":       round(attempt.score or 0, 1),
+            "totalPoints": round(quiz.total_points or 0, 1),
+            "percent":     round((attempt.score or 0) / quiz.total_points * 100)
+                           if quiz.total_points else 0,
+            "submittedAt": attempt.submitted_at.isoformat() if attempt.submitted_at else None,
+        })
+
+    # Sort by score descending
+    leaderboard.sort(key=lambda x: x["score"], reverse=True)
+
+    # Add rank
+    for i, entry in enumerate(leaderboard):
+        entry["rank"] = i + 1
+
+    return leaderboard

@@ -59,3 +59,12 @@ def delete(quiz_id):
         return jsonify({"error": str(e)}), 403
     except RuntimeError as e:
         return jsonify({"error": str(e)}), 404
+
+@quiz_bp.get("/<int:quiz_id>/leaderboard")
+@jwt_required()
+def get_quiz_leaderboard(quiz_id):
+    try:
+        result = quiz_service.get_quiz_leaderboard(quiz_id)
+        return jsonify(result), 200
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 404

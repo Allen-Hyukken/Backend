@@ -108,3 +108,42 @@ def _quiz_summary(q) -> dict:
         "createdAt":     q.created_at.isoformat() if q.created_at else None,
         "teacherName":   q.teacher.name if q.teacher else None,
     }
+
+def get_leaderboard(classroom_id: int) -> list:
+    from models import Attempt
+
+    classroom = Classroom.query.get(classroom_id)
+    if not classroom:
+        raise RuntimeError("Classroom not found")
+
+    students = classroom.students.all()
+    quiz_ids = [q.id for q in classroom.quizzes]
+
+    if not quiz_ids:
+        return []
+
+    leaderboard = []
+    for student in students:
+        attempts = Attempt.query.filter(
+            Attempt.student_id == student.id,
+            Attempt.quiz_id.in_(quiz_ids)
+        ).all()
+
+        total_score   = sum(a.score or 0 for a in attempts)
+        total_points  = sum(a.quiz.total_points or 0 for a in attempts)
+        quizzes_taken = len(attempts)
+
+        leaderboard.append({
+            "userId":       student.id,
+            "name":         student.name,
+            "totalScore":   round(total_score, 1),
+            "totalPoints":  round(total_points, 1),
+            "quizzesTaken": quizzes_taken,
+            "percent":      round(total_score / total_points * 100) if total_points > 0 else 0,
+        })
+
+    leaderboard.sort(key=lambda x: x["totalScore"], reverse=True)
+    for i, entry in enumerate(leaderboard):
+        entry["rank"] = i + 1
+
+    return leaderboard

@@ -87,3 +87,12 @@ def get_banner(classroom_id):
         return Response(image_bytes, mimetype=ct), 200
     except RuntimeError as e:
         return jsonify({"error": str(e)}), 400
+
+@classroom_bp.get("/<int:classroom_id>/leaderboard")
+@jwt_required()
+def get_leaderboard(classroom_id):
+    try:
+        result = classroom_service.get_leaderboard(classroom_id)
+        return jsonify(result), 200
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 404

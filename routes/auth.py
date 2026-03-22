@@ -6,6 +6,8 @@ POST /api/auth/login
 """
 
 from flask import Blueprint, request, jsonify
+from flask_jwt_extended import jwt_required
+
 from services import auth_service
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/api/auth")
@@ -33,3 +35,19 @@ def login():
         return jsonify({"error": str(e)}), 401
     except ValueError as e:
         return jsonify({"error": str(e)}), 422
+
+@auth_bp.get("/me")
+@jwt_required()
+def me():
+    from flask_jwt_extended import get_jwt_identity
+    from models import User
+    email = get_jwt_identity()
+    user = User.query.filter_by(email=email).first()
+    if not user:
+        return jsonify({"error": "Account not found"}), 401
+    return jsonify({
+        "id":    user.id,
+        "name":  user.name,
+        "email": user.email,
+        "role":  user.role.value,
+    }), 200
