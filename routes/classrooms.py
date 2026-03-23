@@ -1,12 +1,14 @@
 """
 Classroom routes — mirrors ClassroomController.java
 
-POST   /api/classrooms              (TEACHER)
-GET    /api/classrooms              (any authenticated)
-GET    /api/classrooms/<id>         (any authenticated)
-POST   /api/classrooms/join?code=   (STUDENT)
-POST   /api/classrooms/<id>/banner  (TEACHER, multipart)
-GET    /api/classrooms/<id>/banner  (any authenticated)
+POST   /api/classrooms                         (TEACHER)
+GET    /api/classrooms                         (any authenticated)
+GET    /api/classrooms/<id>                    (any authenticated)
+POST   /api/classrooms/join?code=              (STUDENT)
+DELETE /api/classrooms/<id>/students/<sid>     (TEACHER)
+POST   /api/classrooms/<id>/banner             (TEACHER, multipart)
+GET    /api/classrooms/<id>/banner             (any authenticated)
+GET    /api/classrooms/<id>/leaderboard        (any authenticated)
 """
 
 from flask import Blueprint, request, jsonify, Response
@@ -59,6 +61,21 @@ def join():
     try:
         classroom_service.join_by_code(code, get_jwt_identity())
         return jsonify({}), 200
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 422
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@classroom_bp.delete("/<int:classroom_id>/students/<int:student_id>")
+@teacher_required
+def remove_student(classroom_id, student_id):
+    """Teacher removes a student from their classroom."""
+    try:
+        classroom_service.remove_student(classroom_id, student_id, get_jwt_identity())
+        return jsonify({}), 200
+    except PermissionError as e:
+        return jsonify({"error": str(e)}), 403
     except RuntimeError as e:
         return jsonify({"error": str(e)}), 400
 
@@ -87,6 +104,7 @@ def get_banner(classroom_id):
         return Response(image_bytes, mimetype=ct), 200
     except RuntimeError as e:
         return jsonify({"error": str(e)}), 400
+
 
 @classroom_bp.get("/<int:classroom_id>/leaderboard")
 @jwt_required()
