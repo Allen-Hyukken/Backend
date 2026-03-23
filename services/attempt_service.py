@@ -120,6 +120,24 @@ def grade_answer(data: dict) -> None:
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+def _get_display_text(answer) -> str:
+    """Return human-readable answer text.
+    For MCQ: looks up choice text by choice_id.
+    For others: returns given_text.
+    """
+    from models import Choice
+    if answer.choice_id is not None:
+        # Try loaded relationship first
+        if answer.choice and hasattr(answer.choice, 'text'):
+            return answer.choice.text
+        # Fallback: query directly
+        choice = Choice.query.get(answer.choice_id)
+        if choice:
+            return choice.text
+        return answer.given_text or str(answer.choice_id)
+    return answer.given_text or ''
+
+
 def _find_user(email: str) -> User:
     user = User.query.filter_by(email=email).first()
     if not user:
@@ -148,7 +166,8 @@ def _to_response(attempt: Attempt) -> dict:
             {
                 "questionId":   a.question_id,
                 "questionText": a.question.text,
-                "givenText":    a.given_text,
+                # For MCQ: look up choice text by choice_id from question.choices
+                "givenText":    _get_display_text(a),
                 "choiceId":     a.choice_id,
                 "correct":      a.correct,
                 "essayScore":   a.essay_score,
