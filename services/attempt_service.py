@@ -1,12 +1,13 @@
 """
 AttemptService — mirrors AttemptService.java
 
-submit()        Student submits answers; auto-grades MCQ / TF / IDENT
-get_attempt()   Fetch one attempt result by ID
+submit()          Student submits answers; enforces deadline; auto-grades MCQ/TF/IDENT
+get_attempt()     Fetch one attempt result by ID
 get_my_attempts() All attempts for the logged-in student
-grade_answer()  Teacher manually grades an ESSAY or CODING answer
+grade_answer()    Teacher manually grades an ESSAY answer
 """
 
+from datetime import datetime
 from extensions import db
 from models import Attempt, Answer, Quiz, User, Question, QuestionType
 
@@ -21,6 +22,14 @@ def submit(data: dict, student_email: str) -> dict:
     if not quiz:
         raise RuntimeError("Quiz not found")
 
+    # ── Deadline enforcement ─────────────────────────────────────────────────
+    if quiz.deadline and quiz.deadline < datetime.utcnow():
+        raise ValueError("The deadline for this quiz has passed.")
+
+    # ── Published check ──────────────────────────────────────────────────────
+    if quiz.published is False:
+        raise ValueError("This quiz is not currently available.")
+
     submitted_answers: dict = data.get("answers") or {}
 
     attempt = Attempt(quiz=quiz, student=student, score=0.0)
@@ -31,7 +40,6 @@ def submit(data: dict, student_email: str) -> dict:
     answers = []
 
     for question in quiz.questions:
-        # answers keys come in as strings from JSON
         given_text = submitted_answers.get(str(question.id)) or submitted_answers.get(question.id)
 
         answer = Answer(
@@ -45,12 +53,10 @@ def submit(data: dict, student_email: str) -> dict:
             if given_text:
                 try:
                     choice_id = int(given_text)
-                    choice = next(
-                        (c for c in question.choices if c.id == choice_id), None
-                    )
+                    choice = next((c for c in question.choices if c.id == choice_id), None)
                     if choice:
-                        answer.choice   = choice
-                        answer.correct  = choice.correct
+                        answer.choice  = choice
+                        answer.correct = choice.correct
                         if answer.correct:
                             score += question.points
                 except (ValueError, TypeError):
@@ -69,8 +75,7 @@ def submit(data: dict, student_email: str) -> dict:
                     score += question.points
 
         elif question.type in (QuestionType.ESSAY, QuestionType.CODING):
-            # Stored; teacher grades manually later
-            answer.correct = False
+            answer.correct = False  # manual grading
 
         answers.append(answer)
 
@@ -88,7 +93,7 @@ def get_attempt(attempt_id: int) -> dict:
 
 
 def get_my_attempts(student_email: str) -> list:
-    student = _find_user(student_email)
+    student  = _find_user(student_email)
     attempts = Attempt.query.filter_by(student_id=student.id).all()
     return [_to_response(a) for a in attempts]
 
@@ -121,16 +126,10 @@ def grade_answer(data: dict) -> None:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def _get_display_text(answer) -> str:
-    """Return human-readable answer text.
-    For MCQ: looks up choice text by choice_id.
-    For others: returns given_text.
-    """
     from models import Choice
     if answer.choice_id is not None:
-        # Try loaded relationship first
         if answer.choice and hasattr(answer.choice, 'text'):
             return answer.choice.text
-        # Fallback: query directly
         choice = Choice.query.get(answer.choice_id)
         if choice:
             return choice.text
@@ -152,12 +151,17 @@ def _to_response(attempt: Attempt) -> dict:
     )
     total_q = len(attempt.answers)
 
+    # Include showAnswers so Flutter knows whether to display review
+    quiz = attempt.quiz
+    show_answers = bool(quiz.show_answers) if quiz else False
+
     return {
         "attemptId":      attempt.id,
-        "quizId":         attempt.quiz.id,
-        "quizTitle":      attempt.quiz.title,
+        "quizId":         quiz.id if quiz else None,
+        "quizTitle":      quiz.title if quiz else "",
+        "showAnswers":    show_answers,
         "score":          attempt.score,
-        "totalPoints":    attempt.quiz.total_points,
+        "totalPoints":    quiz.total_points if quiz else 0,
         "totalQuestions": total_q,
         "answeredCount":  answered,
         "skippedCount":   total_q - answered,
@@ -166,7 +170,6 @@ def _to_response(attempt: Attempt) -> dict:
             {
                 "questionId":   a.question_id,
                 "questionText": a.question.text,
-                # For MCQ: look up choice text by choice_id from question.choices
                 "givenText":    _get_display_text(a),
                 "choiceId":     a.choice_id,
                 "correct":      a.correct,

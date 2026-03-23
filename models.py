@@ -1,10 +1,5 @@
 """
 SQLAlchemy models — mapped to quizdatabase MySQL schema.
-
-Fixes vs original:
-  1. All IDs use BigInteger to match MySQL BIGINT
-  2. Quiz.classroom_id is mapped to the real column name  class_room_id
-     (MySQL schema uses class_room_id, not classroom_id)
 """
 
 import enum
@@ -83,12 +78,22 @@ class Quiz(db.Model):
     description = db.Column(db.Text)
     published   = db.Column(db.Boolean, default=True)
 
-    # FIX: MySQL column is class_room_id (not classroom_id)
+    # MySQL column is class_room_id (Java naming)
     classroom_id = db.Column("class_room_id", db.BigInteger, db.ForeignKey("classroom.id"))
 
     teacher_id   = db.Column(db.BigInteger, db.ForeignKey("users.id"))
-    total_points = db.Column(db.Float,      default=0.0)
-    created_at   = db.Column(db.DateTime,   default=datetime.utcnow)
+    total_points = db.Column(db.Float,    default=0.0)
+    created_at   = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # ── Teacher-set quiz controls ────────────────────────────────────────────
+    # How many minutes a student has after starting. NULL = no limit.
+    time_limit_minutes = db.Column(db.Integer, nullable=True)
+
+    # Hard cutoff — students cannot submit after this timestamp. NULL = no deadline.
+    deadline = db.Column(db.DateTime, nullable=True)
+
+    # When True, students see correct/wrong answer breakdown after submitting.
+    show_answers = db.Column(db.Boolean, default=False, nullable=False)
 
     classroom = db.relationship("Classroom", back_populates="quizzes")
     teacher   = db.relationship("User", foreign_keys=[teacher_id])
@@ -154,7 +159,7 @@ class Answer(db.Model):
     choice_id   = db.Column(db.BigInteger, db.ForeignKey("choice.id"),   nullable=True)
     given_text  = db.Column(db.Text)
     correct     = db.Column(db.Boolean,    default=False)
-    essay_score = db.Column(db.Float)
+    essay_score = db.Column(db.Float)       # manual grade for ESSAY questions
 
     attempt  = db.relationship("Attempt",  back_populates="answers")
     question = db.relationship("Question")

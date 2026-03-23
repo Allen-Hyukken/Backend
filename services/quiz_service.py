@@ -1,15 +1,11 @@
 """
-QuizService
-
-Fix vs original:
-  _to_summary() now includes  classRoomId  and  classRoomName  because
-  Flutter's QuizModel.fromJson reads both fields:
-      classRoomId:   j['classRoomId'] ?? 0,
-      classRoomName: j['classRoomName'],
+QuizService — includes timeLimitMinutes, deadline, showAnswers in all responses
+so Flutter can enforce the teacher's settings client-side.
 """
 
 from extensions import db
 from models import Quiz, Question, Choice, Classroom, User, QuestionType
+from datetime import datetime
 
 
 def create(data: dict, teacher_email: str) -> dict:
@@ -112,18 +108,34 @@ def _find_user(email: str) -> User:
 
 
 def _to_summary(q: Quiz) -> dict:
-    # FIX: added classRoomId + classRoomName — required by Flutter's QuizModel.fromJson
+    """
+    Returns the full quiz summary including all teacher-set controls.
+    Flutter reads timeLimitMinutes, deadline, and showAnswers to:
+      - enforce the countdown timer in QuizScreen
+      - block start / auto-submit when deadline has passed
+      - show or hide correct/wrong answer breakdown in ResultScreen
+    """
     return {
-        "id":            q.id,
-        "title":         q.title,
-        "description":   q.description,
-        "published":     q.published,
-        "classRoomId":   q.classroom_id,
-        "classRoomName": q.classroom.name if q.classroom else None,
-        "questionCount": len(q.questions),
-        "totalPoints":   q.total_points,
-        "createdAt":     q.created_at.isoformat() if q.created_at else None,
-        "teacherName":   q.teacher.name if q.teacher else None,
+        "id":                q.id,
+        "title":             q.title,
+        "description":       q.description,
+        "published":         q.published,
+        "classRoomId":       q.classroom_id,
+        "classRoomName":     q.classroom.name if q.classroom else None,
+        "questionCount":     len(q.questions),
+        "totalPoints":       q.total_points,
+        "createdAt":         q.created_at.isoformat() if q.created_at else None,
+        "teacherName":       q.teacher.name if q.teacher else None,
+
+        # ── Teacher-controlled settings ──────────────────────────────────
+        # Minutes the student has after starting. None = no limit.
+        "timeLimitMinutes":  q.time_limit_minutes,
+
+        # ISO 8601 deadline string. None = no deadline.
+        "deadline":          q.deadline.isoformat() if q.deadline else None,
+
+        # Whether students can see correct/wrong breakdown after submitting.
+        "showAnswers":       bool(q.show_answers),
     }
 
 
@@ -155,7 +167,6 @@ def get_quiz_leaderboard(quiz_id: int) -> list:
     if not quiz:
         raise RuntimeError("Quiz not found")
 
-    # Get all attempts for this quiz
     attempts = Attempt.query.filter_by(quiz_id=quiz_id).all()
 
     leaderboard = []
@@ -171,10 +182,7 @@ def get_quiz_leaderboard(quiz_id: int) -> list:
             "submittedAt": attempt.submitted_at.isoformat() if attempt.submitted_at else None,
         })
 
-    # Sort by score descending
     leaderboard.sort(key=lambda x: x["score"], reverse=True)
-
-    # Add rank
     for i, entry in enumerate(leaderboard):
         entry["rank"] = i + 1
 
