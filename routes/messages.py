@@ -4,14 +4,6 @@
 #   Announcements  — teacher → whole class (read-only for students)
 #   Class chat     — everyone in a classroom (group chat)
 #   Direct messages — student↔student, student↔teacher (private)
-#
-# HOW TO WIRE UP in app.py:
-#   1. Import and register:
-#        from routes.messages import messages_bp, create_message_tables
-#        app.register_blueprint(messages_bp)
-#   2. Create tables (add inside create_app after blueprints):
-#        with app.app_context():
-#            create_message_tables()
 
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
@@ -20,7 +12,7 @@ from utils.decorators import teacher_required
 
 messages_bp = Blueprint('messages', __name__, url_prefix='/api')
 
-# ── Table creation ────────────────────────────────────────────────────────────
+# ── Table creation ─────────────────────────────────────────────────────────────
 
 def create_message_tables():
     db.session.execute(db.text("""
@@ -67,7 +59,7 @@ def create_message_tables():
     db.session.commit()
     print('[messages] Tables ready.')
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _current_user():
     from models import User
@@ -78,8 +70,13 @@ def _current_user():
     return user
 
 def _is_in_classroom(user, classroom_id: int) -> bool:
+    """
+    Returns True if the user is either the teacher of the classroom
+    or an enrolled student.
+    NOTE: your table is named 'classroom' (not 'classrooms').
+    """
     row = db.session.execute(db.text("""
-        SELECT 1 FROM classrooms c
+        SELECT 1 FROM classroom c
         LEFT JOIN classroom_students cs
             ON cs.classroom_id = c.id AND cs.student_id = :uid
         WHERE c.id = :cid
@@ -88,12 +85,12 @@ def _is_in_classroom(user, classroom_id: int) -> bool:
     """), {'uid': user.id, 'cid': classroom_id}).fetchone()
     return row is not None
 
-# ── ANNOUNCEMENTS ─────────────────────────────────────────────────────────────
+# ── ANNOUNCEMENTS ──────────────────────────────────────────────────────────────
 
 @messages_bp.post('/classrooms/<int:classroom_id>/announcements')
 @teacher_required
 def post_announcement(classroom_id):
-    user = _current_user()
+    user  = _current_user()
     data  = request.get_json(silent=True) or {}
     title = (data.get('title') or '').strip()
     body  = (data.get('body')  or '').strip()
@@ -122,8 +119,11 @@ def get_announcements(classroom_id):
         ORDER  BY created_at DESC LIMIT 50
     """), {'cid': classroom_id}).fetchall()
     return jsonify([{
-        'id': r[0], 'teacherName': r[1], 'title': r[2],
-        'body': r[3], 'createdAt': r[4].isoformat(),
+        'id':          r[0],
+        'teacherName': r[1],
+        'title':       r[2],
+        'body':        r[3],
+        'createdAt':   r[4].isoformat(),
     } for r in rows]), 200
 
 
@@ -137,7 +137,7 @@ def delete_announcement(ann_id):
     db.session.commit()
     return jsonify({'ok': True}), 200
 
-# ── CLASS CHAT ────────────────────────────────────────────────────────────────
+# ── CLASS CHAT ─────────────────────────────────────────────────────────────────
 
 @messages_bp.post('/classrooms/<int:classroom_id>/chat')
 @jwt_required()
@@ -165,8 +165,8 @@ def get_class_messages(classroom_id):
     user  = _current_user()
     if not _is_in_classroom(user, classroom_id):
         return jsonify({'error': 'Access denied'}), 403
-    since = request.args.get('since')
-    extra = 'AND created_at > :since' if since else ''
+    since  = request.args.get('since')
+    extra  = 'AND created_at > :since' if since else ''
     params = {'cid': classroom_id}
     if since:
         params['since'] = since
@@ -177,12 +177,16 @@ def get_class_messages(classroom_id):
         ORDER  BY created_at ASC LIMIT 100
     """), params).fetchall()
     return jsonify([{
-        'id': r[0], 'senderId': r[1], 'senderName': r[2],
-        'senderRole': r[3], 'body': r[4],
-        'createdAt': r[5].isoformat(), 'isMe': r[1] == user.id,
+        'id':         r[0],
+        'senderId':   r[1],
+        'senderName': r[2],
+        'senderRole': r[3],
+        'body':       r[4],
+        'createdAt':  r[5].isoformat(),
+        'isMe':       r[1] == user.id,
     } for r in rows]), 200
 
-# ── DIRECT MESSAGES ───────────────────────────────────────────────────────────
+# ── DIRECT MESSAGES ────────────────────────────────────────────────────────────
 
 @messages_bp.post('/classrooms/<int:classroom_id>/dm/<int:receiver_id>')
 @jwt_required()
@@ -213,11 +217,11 @@ def send_dm(classroom_id, receiver_id):
 @messages_bp.get('/classrooms/<int:classroom_id>/dm/<int:other_id>')
 @jwt_required()
 def get_dm(classroom_id, other_id):
-    user  = _current_user()
+    user   = _current_user()
     if not _is_in_classroom(user, classroom_id):
         return jsonify({'error': 'Access denied'}), 403
-    since = request.args.get('since')
-    extra = 'AND created_at > :since' if since else ''
+    since  = request.args.get('since')
+    extra  = 'AND created_at > :since' if since else ''
     params = {'cid': classroom_id, 'me': user.id, 'other': other_id}
     if since:
         params['since'] = since
@@ -225,15 +229,19 @@ def get_dm(classroom_id, other_id):
         SELECT id, sender_id, sender_name, sender_role, body, created_at
         FROM   direct_messages
         WHERE  classroom_id = :cid
-          AND  ((sender_id=:me AND receiver_id=:other)
-             OR (sender_id=:other AND receiver_id=:me))
+          AND  ((sender_id = :me    AND receiver_id = :other)
+             OR (sender_id = :other AND receiver_id = :me))
           {extra}
         ORDER  BY created_at ASC LIMIT 100
     """), params).fetchall()
     return jsonify([{
-        'id': r[0], 'senderId': r[1], 'senderName': r[2],
-        'senderRole': r[3], 'body': r[4],
-        'createdAt': r[5].isoformat(), 'isMe': r[1] == user.id,
+        'id':         r[0],
+        'senderId':   r[1],
+        'senderName': r[2],
+        'senderRole': r[3],
+        'body':       r[4],
+        'createdAt':  r[5].isoformat(),
+        'isMe':       r[1] == user.id,
     } for r in rows]), 200
 
 
@@ -245,14 +253,19 @@ def get_members(classroom_id):
     if not _is_in_classroom(user, classroom_id):
         return jsonify({'error': 'Access denied'}), 403
     rows = db.session.execute(db.text("""
-        SELECT u.id, u.name, u.role FROM classrooms c
-        JOIN users u ON u.id = c.teacher_id WHERE c.id = :cid
+        SELECT u.id, u.name, u.role
+        FROM classroom c
+        JOIN users u ON u.id = c.teacher_id
+        WHERE c.id = :cid
         UNION
-        SELECT u.id, u.name, u.role FROM classroom_students cs
-        JOIN users u ON u.id = cs.student_id WHERE cs.classroom_id = :cid
+        SELECT u.id, u.name, u.role
+        FROM classroom_students cs
+        JOIN users u ON u.id = cs.student_id
+        WHERE cs.classroom_id = :cid
     """), {'cid': classroom_id}).fetchall()
     return jsonify([{
-        'id': r[0], 'name': r[1],
+        'id':   r[0],
+        'name': r[1],
         'role': r[2] if isinstance(r[2], str) else r[2].value,
         'isMe': r[0] == user.id,
     } for r in rows]), 200

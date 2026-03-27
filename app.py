@@ -1,6 +1,5 @@
 """
 app.py — Flask application factory
-(Updated to include messaging blueprint)
 """
 
 from flask import Flask, jsonify
@@ -25,20 +24,19 @@ def create_app(config_class=Config):
     from routes.classrooms import classroom_bp
     from routes.quizzes    import quiz_bp
     from routes.attempts   import attempt_bp
-    from routes.messages   import messages_bp, create_message_tables   # ← NEW
+    from routes.messages   import messages_bp, create_message_tables
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(classroom_bp)
     app.register_blueprint(quiz_bp)
     app.register_blueprint(attempt_bp)
-    app.register_blueprint(messages_bp)   # ← NEW
+    app.register_blueprint(messages_bp)
 
-    # ── Create messaging tables on startup ──────────────────────────────────
-    # Safe to run every time — uses CREATE TABLE IF NOT EXISTS
-    with app.app_context():               # ← NEW
-        create_message_tables()           # ← NEW
+    # ── Create messaging tables if they don't exist ─────────────────────────
+    with app.app_context():
+        create_message_tables()
 
-    # ── Health-check endpoint ───────────────────────────────────────────────
+    # ── Health-check endpoint (no auth required) ────────────────────────────
     @app.get("/api/ping")
     def ping():
         db_status = "ok"
