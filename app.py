@@ -1,5 +1,5 @@
 """
-app.py — Flask application factory
+app.py — Flask application factory with WebSocket support
 """
 
 from flask import Flask, jsonify
@@ -7,19 +7,28 @@ from flask_jwt_extended import JWTManager
 from flask_jwt_extended.exceptions import NoAuthorizationError, InvalidHeaderError
 
 from config import Config
-from extensions import db, cors
+from extensions import db, cors, socketio
 
 
 def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
 
-    # ── Extensions ─────────────────────────────────────────────────────────
+    # ── Extensions ──────────────────────────────────────────────────────────
     db.init_app(app)
     JWTManager(app)
     cors.init_app(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)
 
-    # ── Blueprints ──────────────────────────────────────────────────────────
+    # SocketIO — allow all origins so Flutter can connect from any network
+    socketio.init_app(
+        app,
+        cors_allowed_origins="*",
+        async_mode="eventlet",
+        logger=False,
+        engineio_logger=False,
+    )
+
+    # ── Blueprints ────────────────────────────────────────────────────────────
     from routes.auth       import auth_bp
     from routes.classrooms import classroom_bp
     from routes.quizzes    import quiz_bp
@@ -32,11 +41,15 @@ def create_app(config_class=Config):
     app.register_blueprint(attempt_bp)
     app.register_blueprint(messages_bp)
 
-    # ── Create messaging tables if they don't exist ─────────────────────────
+    # ── Register WebSocket event handlers ─────────────────────────────────────
+    from routes.socket_events import register_socket_events
+    register_socket_events(socketio)
+
+    # ── Create messaging tables on startup ────────────────────────────────────
     with app.app_context():
         create_message_tables()
 
-    # ── Health-check endpoint (no auth required) ────────────────────────────
+    # ── Health-check ──────────────────────────────────────────────────────────
     @app.get("/api/ping")
     def ping():
         db_status = "ok"
@@ -46,7 +59,7 @@ def create_app(config_class=Config):
             db_status = f"error: {e}"
         return jsonify({"status": "ok", "db": db_status}), 200
 
-    # ── Global error handlers ───────────────────────────────────────────────
+    # ── Global error handlers ─────────────────────────────────────────────────
     @app.errorhandler(RuntimeError)
     def handle_runtime(e):
         return jsonify({"error": str(e)}), 400
@@ -88,4 +101,6 @@ def create_app(config_class=Config):
 
 
 if __name__ == "__main__":
-    create_app().run(debug=True, host="0.0.0.0", port=5000)
+    # Use socketio.run() instead of app.run() so WebSockets work locally too
+    app = create_app()
+    socketio.run(app, debug=True, host="0.0.0.0", port=5000)
