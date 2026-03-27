@@ -1,8 +1,6 @@
 """
 app.py — Flask application factory
-
-host="0.0.0.0" means the server listens on ALL network interfaces,
-so your phone can reach it over Wi-Fi at http://<PC-LAN-IP>:5000
+(Updated to include messaging blueprint)
 """
 
 from flask import Flask, jsonify
@@ -27,16 +25,20 @@ def create_app(config_class=Config):
     from routes.classrooms import classroom_bp
     from routes.quizzes    import quiz_bp
     from routes.attempts   import attempt_bp
+    from routes.messages   import messages_bp, create_message_tables   # ← NEW
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(classroom_bp)
     app.register_blueprint(quiz_bp)
     app.register_blueprint(attempt_bp)
+    app.register_blueprint(messages_bp)   # ← NEW
 
-    # ── Health-check endpoint (no auth required) ────────────────────────────
-    # Flutter's ConnectionCheckScreen hits this to verify:
-    #   1. Flask is reachable over Wi-Fi
-    #   2. MySQL connection is working
+    # ── Create messaging tables on startup ──────────────────────────────────
+    # Safe to run every time — uses CREATE TABLE IF NOT EXISTS
+    with app.app_context():               # ← NEW
+        create_message_tables()           # ← NEW
+
+    # ── Health-check endpoint ───────────────────────────────────────────────
     @app.get("/api/ping")
     def ping():
         db_status = "ok"
