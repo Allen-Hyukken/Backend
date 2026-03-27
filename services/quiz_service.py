@@ -1,12 +1,15 @@
 """
-QuizService — includes timeLimitMinutes, deadline, showAnswers in all responses
-so Flutter can enforce the teacher's settings client-side.
+QuizService — includes status, timeLimitMinutes, deadline, showAnswers
+in all responses so Flutter can enforce teacher settings.
 """
 
+import re
 from extensions import db
-from models import Quiz, Question, Choice, Classroom, User, QuestionType
+from models import Quiz, QuizStatus, Question, Choice, Classroom, User, QuestionType
 from datetime import datetime
 
+
+# ── Quiz CRUD ──────────────────────────────────────────────────────────────────
 
 def create(data: dict, teacher_email: str) -> dict:
     teacher = _find_user(teacher_email)
@@ -24,11 +27,13 @@ def create(data: dict, teacher_email: str) -> dict:
         raise RuntimeError("Classroom not found")
 
     quiz = Quiz(
-        title       = title,
-        description = data.get("description"),
-        published   = data.get("published", True),
-        classroom   = classroom,
-        teacher     = teacher,
+        title        = title,
+        description  = data.get("description"),
+        published    = False,
+        status       = QuizStatus.DRAFT,   # always starts as draft
+        classroom    = classroom,
+        teacher      = teacher,
+        show_answers = bool(data.get("showAnswers", False)),
     )
 
     questions_data = data.get("questions") or []
@@ -84,8 +89,16 @@ def get_detail(quiz_id: int, teacher_view: bool = False) -> dict:
     return resp
 
 
-def get_by_classroom(classroom_id: int) -> list:
-    quizzes = Quiz.query.filter_by(classroom_id=classroom_id).all()
+def get_by_classroom(classroom_id: int, active_only: bool = True) -> list:
+    """
+    Returns quizzes for a classroom.
+    active_only=True (default) → student-facing: only ACTIVE/published quizzes.
+    active_only=False          → teacher-facing: all quizzes regardless of status.
+    """
+    query = Quiz.query.filter_by(classroom_id=classroom_id)
+    if active_only:
+        query = query.filter_by(status=QuizStatus.ACTIVE)
+    quizzes = query.all()
     return [_to_summary(q) for q in quizzes]
 
 
@@ -99,7 +112,41 @@ def delete(quiz_id: int, teacher_email: str) -> None:
     db.session.commit()
 
 
+# ── Deploy / Retract ───────────────────────────────────────────────────────────
+
+def deploy(quiz_id: int, teacher_email: str) -> dict:
+    """
+    Moves a DRAFT quiz to ACTIVE so students can see and attempt it.
+    Raises PermissionError if the caller is not the quiz's teacher.
+    """
+    quiz = Quiz.query.get(quiz_id)
+    if not quiz:
+        raise RuntimeError("Quiz not found")
+    if quiz.teacher.email != teacher_email:
+        raise PermissionError("Not authorized")
+    quiz.status    = QuizStatus.ACTIVE
+    quiz.published = True
+    db.session.commit()
+    return _to_summary(quiz)
+
+
+def retract(quiz_id: int, teacher_email: str) -> dict:
+    """
+    Moves an ACTIVE quiz back to DRAFT, hiding it from students.
+    """
+    quiz = Quiz.query.get(quiz_id)
+    if not quiz:
+        raise RuntimeError("Quiz not found")
+    if quiz.teacher.email != teacher_email:
+        raise PermissionError("Not authorized")
+    quiz.status    = QuizStatus.DRAFT
+    quiz.published = False
+    db.session.commit()
+    return _to_summary(quiz)
+
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
+
 def _find_user(email: str) -> User:
     user = User.query.filter_by(email=email).first()
     if not user:
@@ -109,32 +156,26 @@ def _find_user(email: str) -> User:
 
 def _to_summary(q: Quiz) -> dict:
     """
-    Returns the full quiz summary including all teacher-set controls.
-    Flutter reads timeLimitMinutes, deadline, and showAnswers to:
-      - enforce the countdown timer in QuizScreen
-      - block start / auto-submit when deadline has passed
-      - show or hide correct/wrong answer breakdown in ResultScreen
+    Full quiz summary. Flutter reads:
+      - status           → hide DRAFT quizzes from student UI
+      - timeLimitMinutes → enforce countdown timer in QuizScreen
+      - deadline         → block start / auto-submit when past
+      - showAnswers      → show/hide correct/wrong breakdown in ResultScreen
     """
     return {
         "id":                q.id,
         "title":             q.title,
         "description":       q.description,
         "published":         q.published,
+        "status":            q.status.value if q.status else QuizStatus.DRAFT.value,
         "classRoomId":       q.classroom_id,
         "classRoomName":     q.classroom.name if q.classroom else None,
         "questionCount":     len(q.questions),
         "totalPoints":       q.total_points,
         "createdAt":         q.created_at.isoformat() if q.created_at else None,
         "teacherName":       q.teacher.name if q.teacher else None,
-
-        # ── Teacher-controlled settings ──────────────────────────────────
-        # Minutes the student has after starting. None = no limit.
         "timeLimitMinutes":  q.time_limit_minutes,
-
-        # ISO 8601 deadline string. None = no deadline.
         "deadline":          q.deadline.isoformat() if q.deadline else None,
-
-        # Whether students can see correct/wrong breakdown after submitting.
         "showAnswers":       bool(q.show_answers),
     }
 

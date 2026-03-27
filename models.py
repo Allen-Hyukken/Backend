@@ -29,6 +29,11 @@ class QuestionType(str, enum.Enum):
     CODING = "CODING"
 
 
+class QuizStatus(str, enum.Enum):
+    DRAFT  = "DRAFT"   # invisible to students; teacher is still building it
+    ACTIVE = "ACTIVE"  # deployed; students can see and attempt it
+
+
 # ── User ───────────────────────────────────────────────────────────────────────
 class User(db.Model):
     __tablename__ = "users"
@@ -76,24 +81,27 @@ class Quiz(db.Model):
     id          = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
     title       = db.Column(db.String(255), nullable=False)
     description = db.Column(db.Text)
-    published   = db.Column(db.Boolean, default=True)
+
+    # Legacy visibility flag — kept in sync with status (True when ACTIVE)
+    published   = db.Column(db.Boolean, default=False, nullable=False)
+
+    # Draft-vs-deployed state (DRAFT = hidden from students, ACTIVE = live)
+    status = db.Column(
+        db.Enum(QuizStatus),
+        default=QuizStatus.DRAFT,
+        nullable=False,
+    )
 
     # MySQL column is class_room_id (Java naming)
     classroom_id = db.Column("class_room_id", db.BigInteger, db.ForeignKey("classroom.id"))
-
     teacher_id   = db.Column(db.BigInteger, db.ForeignKey("users.id"))
     total_points = db.Column(db.Float,    default=0.0)
     created_at   = db.Column(db.DateTime, default=datetime.utcnow)
 
     # ── Teacher-set quiz controls ────────────────────────────────────────────
-    # How many minutes a student has after starting. NULL = no limit.
     time_limit_minutes = db.Column(db.Integer, nullable=True)
-
-    # Hard cutoff — students cannot submit after this timestamp. NULL = no deadline.
-    deadline = db.Column(db.DateTime, nullable=True)
-
-    # When True, students see correct/wrong answer breakdown after submitting.
-    show_answers = db.Column(db.Boolean, default=False, nullable=False)
+    deadline           = db.Column(db.DateTime, nullable=True)
+    show_answers       = db.Column(db.Boolean, default=False, nullable=False)
 
     classroom = db.relationship("Classroom", back_populates="quizzes")
     teacher   = db.relationship("User", foreign_keys=[teacher_id])
@@ -104,6 +112,10 @@ class Quiz(db.Model):
         order_by="Question.q_index",
         lazy="select",
     )
+
+    # ── Convenience helpers ──────────────────────────────────────────────────
+    def is_draft(self)  -> bool: return self.status == QuizStatus.DRAFT
+    def is_active(self) -> bool: return self.status == QuizStatus.ACTIVE
 
 
 # ── Question ───────────────────────────────────────────────────────────────────
